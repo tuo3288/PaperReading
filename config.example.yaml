@@ -1,0 +1,60 @@
+# Multi-Agent Paper Analysis System - Example Configuration
+# 复制此文件为 config.yaml 并填入您的实际配置
+
+# API配置
+api:
+  base_url: ""                           # 您的one-api URL（只到/v1，不包含/chat/completions）
+  api_key: ""                            # 您的API key
+  timeout: 120                           # 超时时间（秒）
+  max_retries: 5                         # API调用失败后的最大重试次数（推荐5次）
+
+# 模型配置
+models:
+  analyzer: "gemini-2.5-pro-preview-06-05-maxthinking"  # 分析者：强模型
+  reviewer: "gemini-2.5-flash-nothinking"               # 审核者：快速模型
+
+# 工作流配置
+workflow:
+  num_questions: 3              # 审核者提问数量（建议3-5个）
+  max_followup_per_question: 2  # 每个问题最多追问次数（暂未使用）
+  verification_threshold: 0.8   # 核实通过阈值（暂未使用）
+  enable_citation_check: true   # 是否启用引用检查
+  enable_user_qa: true          # 是否启用用户自由对话模式（默认启用，自动问答完成后可向分析者提问）
+
+  # 最终报告整合模型选择
+  final_integration_model: "reviewer"  # 可选值: "reviewer" 或 "analyzer"
+  # - "reviewer" (默认): 使用快速模型整合，速度快、成本低，适合快速预览
+  #   优点：响应快速、成本低廉
+  #   缺点：语言组织能力一般、不会进行深度综合分析
+  # - "analyzer": 使用强模型整合，质量高、洞察深，适合重要论文的深度解读
+  #   优点：逻辑连贯性强、能发现问答间的隐含联系、生成高质量报告
+  #   缺点：响应较慢、成本增加约25%
+
+# 输出配置
+output:
+  format: "markdown"            # 输出格式
+  include_citations: true       # 是否包含引用
+  save_intermediate: true       # 保存中间对话记录（推荐开启）
+  output_dir: "output"          # 输出目录
+  enable_checkpoints: true      # 启用检查点保存（推荐开启，避免API调用浪费）
+  checkpoint_dir: "checkpoints" # 检查点目录
+
+# 检查点自动清理配置
+checkpoint_management:
+  auto_cleanup: true                    # 是否启用自动清理（程序启动时检查）
+  max_checkpoint_size_mb: 100           # 总大小超过此值时清理（MB）
+  # max_checkpoint_files: null          # 总文件数超过此值时清理（不配置则不限制）
+  # max_checkpoint_age_days: null       # 超过此天数的检查点清理（不配置则不限制）
+  # keep_per_paper: null                # 每篇论文保留最新N个检查点（不配置则不限制）
+  # keep_completed: true                # 是否保留已完成的检查点（true=保留完整的分析结果）
+
+# PDF解析配置
+pdf:
+  extract_images: false         # 是否提取图片（暂未实现）
+  extract_tables: true          # 是否提取表格（暂未实现）
+  language: "en"                # 语言（en/zh）
+
+# 日志配置
+logging:
+  level: "INFO"                 # DEBUG/INFO/WARNING/ERROR
+  file: "paper_analysis.log"    # 日志文件
