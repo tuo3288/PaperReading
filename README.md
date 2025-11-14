@@ -390,7 +390,7 @@ python main.py paper.pdf
 
 ## 📄 许可证
 
-MIT License
+HIT License
 
 ---
 
