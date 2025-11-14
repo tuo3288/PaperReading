@@ -414,6 +414,7 @@ def save_checkpoint(state: Dict, checkpoint_base_dir: str = "checkpoints"):
 
             # 状态数据
             'paper_path': paper_path,
+            'paper_content': state.get('paper_content', ''),  # ✓ 保存论文全文（用于恢复）
             'paper_structure': state.get('paper_structure', ''),
             'selected_questions': state.get('selected_questions', []),
             'messages': list(state.get('messages', [])),
@@ -422,8 +423,11 @@ def save_checkpoint(state: Dict, checkpoint_base_dir: str = "checkpoints"):
             'current_question_id': current_q,
             'current_round': state.get('current_round', 0),
             'total_questions': total_q,
+            'max_followups': state.get('max_followups', 2),  # ✓ 保存追问配置
             'final_report': state.get('final_report', ''),
+            'intermediate_outputs': state.get('intermediate_outputs', {}),  # ✓ 保存中间结果
             'start_time': state.get('start_time', 0.0),
+            'end_time': state.get('end_time', 0.0),  # ✓ 保存结束时间
         }
 
         # 保存到文件
@@ -611,8 +615,25 @@ def list_checkpoints(paper_path: str, checkpoint_base_dir: str = "checkpoints") 
                     total_q = data.get('total_questions', 3)
                     has_final_report = bool(data.get('final_report', '').strip())
 
+                    # 验证实际完成的问题数
+                    messages = data.get('messages', [])
+                    answered_questions = set()
+                    for msg in messages:
+                        if msg.get('role') == 'analyzer' and msg.get('question_id') > 0:
+                            answered_questions.add(msg['question_id'])
+                    actual_count = len(answered_questions)
+
                     # 判断是否已完成：有最终报告
                     is_completed = has_final_report
+
+                    # 生成进度文本（显示实际完成度）
+                    if is_completed:
+                        progress_text = "已完成"
+                    elif current_q != actual_count:
+                        # 状态不一致，显示警告
+                        progress_text = f"{actual_count}/{total_q} 问题 (标记: {current_q}⚠️)"
+                    else:
+                        progress_text = f"{current_q}/{total_q} 问题"
 
                     checkpoints.append({
                         'file': filepath,
@@ -621,11 +642,13 @@ def list_checkpoints(paper_path: str, checkpoint_base_dir: str = "checkpoints") 
                         'size': stat.st_size,
                         'saved_at': saved_at,
                         'current_question': current_q,
+                        'actual_count': actual_count,  # 新增：实际完成数
                         'total_questions': total_q,
-                        'progress_text': f"{current_q}/{total_q} 问题" if not is_completed else "已完成",
+                        'progress_text': progress_text,
                         'has_structure': bool(data.get('paper_structure')),
                         'num_messages': len(data.get('messages', [])),
                         'is_completed': is_completed,
+                        'is_consistent': (current_q == actual_count),  # 新增：是否一致
                     })
                 except Exception as e:
                     logger.warning(f"Failed to read checkpoint {filename}: {e}")
@@ -912,4 +935,64 @@ def cleanup_checkpoints(checkpoint_base_dir: str = "checkpoints", config: Dict =
         'freed_mb': freed_mb,
         'details': details
     }
+
+
+# ==================== 状态一致性验证 ====================
+
+def validate_state_consistency(state: Dict) -> Tuple[bool, List[str], int]:
+    """
+    验证状态一致性，检查 current_question_id 是否与实际回答数一致
+
+    Args:
+        state: 状态字典
+
+    Returns:
+        Tuple[bool, List[str], int]: (是否一致, 错误列表, 实际完成的问题数)
+
+    Example:
+        is_consistent, errors, actual_count = validate_state_consistency(state)
+        if not is_consistent:
+            logger.warning(f"State inconsistency detected: {errors}")
+            state['current_question_id'] = actual_count
+    """
+    errors = []
+    current_q = state.get('current_question_id', 0)
+    total_q = state.get('total_questions', 3)
+    messages = state.get('messages', [])
+
+    # 统计每个问题的回答情况
+    answered_questions = set()
+    for msg in messages:
+        if msg.get('role') == 'analyzer' and msg.get('question_id') > 0:
+            answered_questions.add(msg['question_id'])
+
+    actual_count = len(answered_questions)
+
+    # 检查1: current_question_id 是否超前
+    if current_q > actual_count:
+        errors.append(
+            f"current_question_id={current_q} 但只有 {actual_count} 个问题被回答"
+        )
+
+    # 检查2: 是否有跳过的问题（如：回答了Q1和Q3，但没有Q2）
+    if actual_count > 0:
+        expected_range = set(range(1, actual_count + 1))
+        if answered_questions != expected_range:
+            missing = expected_range - answered_questions
+            errors.append(
+                f"问题编号不连续，缺失问题: {sorted(missing)}"
+            )
+
+    # 检查3: 是否超过总问题数
+    if actual_count > total_q:
+        errors.append(
+            f"回答的问题数 {actual_count} 超过总问题数 {total_q}"
+        )
+
+    is_consistent = len(errors) == 0
+
+    if not is_consistent:
+        logger.debug(f"State validation found {len(errors)} issues: {errors}")
+
+    return is_consistent, errors, actual_count
 

@@ -7,11 +7,51 @@ from typing import Dict
 from langgraph.graph import StateGraph, END
 from graph.state import PaperAnalysisState
 from utils.llm_client import LLMClient
-from utils.checkpoint import save_checkpoint, save_readable_checkpoint
+from utils.checkpoint import save_checkpoint, save_readable_checkpoint, validate_state_consistency
 from agents import analyzer, reviewer
 
 
 logger = logging.getLogger(__name__)
+
+
+def merge_state_update(current_state: Dict, state_update: Dict) -> None:
+    """
+    正确合并状态更新，处理 LangGraph 的累积字段
+
+    LangGraph 的 Annotated[Sequence[Message], operator.add] 字段需要累积而不是替换。
+    但 dict.update() 会直接替换同名键，导致之前的 messages 丢失。
+
+    此函数正确处理累积字段，确保：
+    1. messages 完整累积（用于检查点保存和最终报告）
+    2. 但各节点调用 LLM 时不使用 messages（避免上下文过长）
+    3. analyzer 只用 paper_content + paper_structure
+    4. reviewer 只用 paper_content
+    5. 只有 integrate_final_report 使用完整 messages
+
+    Args:
+        current_state: 当前状态（会被修改）
+        state_update: 增量更新
+    """
+    for key, value in state_update.items():
+        if key == 'messages':
+            # messages 字段使用 operator.add，需要累积而不是替换
+            if 'messages' not in current_state:
+                current_state['messages'] = []
+            if isinstance(value, list):
+                current_state['messages'].extend(value)
+            else:
+                current_state['messages'].append(value)
+        elif key in ['qa_pairs', 'verification_results']:
+            # 其他累积字段（列表）
+            if key not in current_state:
+                current_state[key] = []
+            if isinstance(value, list):
+                current_state[key].extend(value)
+            else:
+                current_state[key].append(value)
+        else:
+            # 普通字段直接替换
+            current_state[key] = value
 
 
 def create_workflow(config: Dict) -> StateGraph:
@@ -172,9 +212,9 @@ def run_workflow(paper_path: str, config: Dict) -> Dict:
             for node_name, node_output in state_update.items():
                 logger.info(f"Completed node: {node_name}")
 
-                # 累积状态更新
+                # 正确累积状态更新（使用 merge_state_update 处理累积字段）
                 if node_output:
-                    current_state.update(node_output)
+                    merge_state_update(current_state, node_output)
 
                 # 如果启用了检查点，并且是关键节点，则保存
                 if enable_checkpoints and node_name in checkpoint_nodes:
@@ -187,10 +227,22 @@ def run_workflow(paper_path: str, config: Dict) -> Dict:
         final_state = current_state
 
     except Exception as e:
-        logger.error(f"Workflow failed, attempting to save checkpoint...")
+        logger.error(f"Workflow failed: {str(e)}")
         # 尝试保存当前状态（如果有的话）
         if enable_checkpoints and current_state:
-            logger.info("Saving checkpoint with partial progress...")
+            # 验证并修正状态一致性
+            is_consistent, errors, actual_count = validate_state_consistency(current_state)
+
+            if not is_consistent:
+                logger.warning(f"⚠️ 检测到状态不一致: {', '.join(errors)}")
+                current_q = current_state.get('current_question_id', 0)
+
+                # 如果 current_question_id 超前，回退到实际完成的问题数
+                if current_q > actual_count:
+                    logger.warning(f"⚠️ 回退 current_question_id: {current_q} → {actual_count}")
+                    current_state['current_question_id'] = actual_count
+
+            logger.info("Saving checkpoint with validated progress...")
             save_checkpoint(current_state, checkpoint_dir)
             save_readable_checkpoint(current_state, checkpoint_dir)
         raise
@@ -279,13 +331,71 @@ def resume_workflow(checkpoint_state: Dict, config: Dict) -> Dict:
         final_state = app.invoke(resume_state)
 
     elif current_q_id >= total_q:
-        # 所有问题已回答，只需生成最终报告
-        logger.info("All questions answered, generating final report")
-        # 直接调用 integrate_report
-        from agents import reviewer
-        llm_client = LLMClient(config)
-        result = reviewer.integrate_final_report(resume_state, llm_client)
-        final_state = {**resume_state, **result, 'end_time': time.time()}
+        # 检查点显示所有问题已回答，但需要验证实际完成情况
+        logger.info(f"Checkpoint shows all questions answered ({current_q_id}/{total_q}), verifying...")
+
+        # 验证状态一致性
+        is_consistent, errors, actual_count = validate_state_consistency(checkpoint_state)
+
+        if is_consistent and actual_count >= total_q:
+            # 真正完成了所有问题，直接生成最终报告
+            logger.info(f"✓ Verified: all {total_q} questions answered, generating final report")
+            from agents import reviewer
+            llm_client = LLMClient(config)
+            result = reviewer.integrate_final_report(resume_state, llm_client)
+            final_state = {**resume_state, **result, 'end_time': time.time()}
+
+        else:
+            # 状态不一致，current_question_id 被错误递增
+            logger.warning(f"⚠️ 状态不一致: checkpoint显示 {current_q_id}/{total_q}, 但实际只有 {actual_count} 个问题被回答")
+            logger.warning(f"   错误详情: {', '.join(errors)}")
+
+            # 回退到正确的状态
+            resume_state['current_question_id'] = actual_count
+            logger.info(f"🔄 回退状态并继续回答剩余问题: 从第 {actual_count + 1} 个问题开始")
+
+            # 继续执行工作流（进入下面的 else 分支的逻辑）
+            # 更新 current_question_id 到下一个问题
+            resume_state['current_question_id'] = actual_count
+            resume_state['current_round'] = resume_state.get('current_round', 0) + 1
+
+            # 从当前位置继续执行
+            try:
+                current_state = dict(resume_state)  # 创建状态副本用于累积
+                for state_update in app.stream(resume_state):
+                    for node_name, node_output in state_update.items():
+                        logger.info(f"Completed node: {node_name}")
+
+                        # 正确累积状态更新（使用 merge_state_update 处理累积字段）
+                        if node_output:
+                            merge_state_update(current_state, node_output)
+
+                        # 在关键节点后保存检查点
+                        if enable_checkpoints and node_name in ['answer_question', 'verify_answer']:
+                            if current_state:
+                                logger.info(f"💾 Saving checkpoint after {node_name}...")
+                                save_checkpoint(current_state, checkpoint_dir)
+                                save_readable_checkpoint(current_state, checkpoint_dir)
+
+                # stream 完成后，current_state 就是最终状态
+                final_state = current_state
+
+            except Exception as e:
+                logger.error(f"Resume workflow failed: {str(e)}")
+                if enable_checkpoints and 'current_state' in locals():
+                    # 验证并修正状态
+                    is_consistent, errors, actual_count = validate_state_consistency(current_state)
+                    if not is_consistent:
+                        logger.warning(f"⚠️ 检测到状态不一致: {', '.join(errors)}")
+                        current_q = current_state.get('current_question_id', 0)
+                        if current_q > actual_count:
+                            logger.warning(f"⚠️ 回退 current_question_id: {current_q} → {actual_count}")
+                            current_state['current_question_id'] = actual_count
+
+                    logger.info("Saving checkpoint with validated progress...")
+                    save_checkpoint(current_state, checkpoint_dir)
+                    save_readable_checkpoint(current_state, checkpoint_dir)
+                raise
 
     else:
         # 部分问题已回答，继续回答剩余问题
@@ -304,9 +414,9 @@ def resume_workflow(checkpoint_state: Dict, config: Dict) -> Dict:
                 for node_name, node_output in state_update.items():
                     logger.info(f"Completed node: {node_name}")
 
-                    # 累积状态更新
+                    # 正确累积状态更新（使用 merge_state_update 处理累积字段）
                     if node_output:
-                        current_state.update(node_output)
+                        merge_state_update(current_state, node_output)
 
                     if enable_checkpoints and node_name in ['answer_question', 'verify_answer']:
                         if current_state:
@@ -314,8 +424,8 @@ def resume_workflow(checkpoint_state: Dict, config: Dict) -> Dict:
                             save_checkpoint(current_state, checkpoint_dir)
                             save_readable_checkpoint(current_state, checkpoint_dir)
 
-            # 重新调用获取最终状态
-            final_state = app.invoke(resume_state)
+            # stream 完成后，current_state 就是最终状态
+            final_state = current_state
 
         except Exception as e:
             logger.error(f"Resume workflow failed: {str(e)}")

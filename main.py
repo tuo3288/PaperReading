@@ -255,16 +255,25 @@ def main():
     parser.add_argument('--output-dir', help='Output directory (overrides config)')
     parser.add_argument('--resume', action='store_true', help='Resume from latest checkpoint')
     parser.add_argument('--checkpoint', help='Resume from specific checkpoint file')
-    parser.add_argument('--reset', action='store_true', help='Clear all output and checkpoint directories')
+    parser.add_argument('--reset', action='store_true', help='Clear all output, checkpoint directories and log files')
 
     args = parser.parse_args()
 
     # ==================== 处理 --reset ====================
     if args.reset:
-        print("\n⚠️  警告: 即将清空所有输出和检查点目录！")
+        # 尝试加载配置以获取 log 文件路径
+        log_file = 'paper_analysis.log'  # 默认值
+        try:
+            config = load_config(args.config)
+            log_file = config.get('logging', {}).get('file', 'paper_analysis.log')
+        except:
+            pass  # 如果加载失败，使用默认值
+
+        print("\n⚠️  警告: 即将清空所有输出、检查点和日志文件！")
         print("这将删除:")
         print("  - output/ 目录下的所有分析报告")
         print("  - checkpoints/ 目录下的所有检查点文件")
+        print(f"  - {log_file} (日志文件)")
         print()
 
         try:
@@ -320,6 +329,17 @@ def main():
                         shutil.rmtree(item_path)
                 except Exception as e:
                     print(f"⚠️  无法删除 {item_path}: {e}")
+
+        # 清空 log 文件
+        if os.path.exists(log_file):
+            try:
+                size = os.path.getsize(log_file)
+                os.remove(log_file)
+                deleted_files += 1
+                freed_bytes += size
+                print(f"🗑️  已删除日志文件: {log_file}")
+            except Exception as e:
+                print(f"⚠️  无法删除日志文件 {log_file}: {e}")
 
         freed_mb = freed_bytes / (1024 * 1024)
         print(f"\n✅ 清空完成!")
