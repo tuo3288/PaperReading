@@ -1,4 +1,4 @@
-# 论文分析多代理系统
+# 论文分析multi-agent系统
 
 <div align="center">
 
@@ -12,7 +12,7 @@
 
 ## ✨ 核心特性
 
-### 🤖 多代理协作
+### 🤖 multi-agent协作
 - **分析者（Analyzer）**: 强大的深度模型，负责理解论文和回答问题
 - **审核者（Reviewer）**: 快速模型，负责选择问题、核实答案和整合报告
 - **智能工作流**: 自动化的问答循环，每个问题可追问多轮
@@ -263,9 +263,9 @@ python main.py <paper_path> [OPTIONS]
 
 ```
 paper-analysis-multiagent/
-├── agents/              # 代理实现
-│   ├── analyzer.py      # 分析者代理
-│   ├── reviewer.py      # 审核者代理
+├── agents/              # agent实现
+│   ├── analyzer.py      # 分析者agent
+│   ├── reviewer.py      # 审核者agent
 │   └── prompts.py       # Prompt 模板
 ├── graph/               # 工作流定义
 │   ├── workflow.py      # LangGraph 工作流
@@ -380,7 +380,7 @@ python main.py paper.pdf
 ### v1.0.0 (2025-11-12)
 
 **初始版本:**
-- 🤖 多代理协作系统
+- 🤖 multi-agent协作系统
 - 💾 检查点保存与恢复
 - 📊 arXiv ID 自动分类
 - 🧹 自动清理管理
@@ -398,7 +398,7 @@ HIT License
 
 本项目基于以下优秀开源项目：
 
-- [LangGraph](https://github.com/langchain-ai/langgraph) - 多代理工作流编排
+- [LangGraph](https://github.com/langchain-ai/langgraph) - multi-agent工作流编排
 - [LangChain](https://github.com/langchain-ai/langchain) - LLM 应用框架
 - [PyMuPDF](https://github.com/pymupdf/PyMuPDF) - PDF 处理
 - [OpenAI API](https://openai.com) - LLM 接口
