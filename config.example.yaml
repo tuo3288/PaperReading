@@ -7,6 +7,7 @@ api:
   api_key: ""                            # 您的API key
   timeout: 120                           # 超时时间（秒）
   max_retries: 5                         # API调用失败后的最大重试次数（推荐5次）
+  max_tokens: 8000                       # 最大输出token数（建议8000-16000，防止输出截断）
 
 # 模型配置
 models:

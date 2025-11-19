@@ -40,6 +40,7 @@ class LLMClient:
 
         self.models = config.get('models', {})
         self.max_retries = api_config.get('max_retries', 3)  # 从配置读取重试次数
+        self.max_tokens = api_config.get('max_tokens', 8000)  # 从配置读取最大输出token数
         self.logger = logging.getLogger(__name__)
 
     def call_analyzer(self, prompt: str, temperature: float = 0.3) -> str:
@@ -104,7 +105,7 @@ class LLMClient:
                         {"role": "user", "content": prompt}
                     ],
                     temperature=temperature,
-                    max_tokens=4000  # 足够长的输出
+                    max_tokens=self.max_tokens
                 )
 
                 # 检查 response.choices 是否为空
