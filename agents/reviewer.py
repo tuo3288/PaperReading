@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 def select_questions(state: PaperAnalysisState, llm_client: LLMClient) -> Dict:
     """
-    选择3个重要问题
+    选择N个重要问题（根据配置中的 num_questions）
 
     Args:
         state: 当前状态
@@ -31,15 +31,16 @@ def select_questions(state: PaperAnalysisState, llm_client: LLMClient) -> Dict:
     logger.info("Reviewer: Selecting questions...")
 
     paper_structure = state['paper_structure']
+    num_questions = state.get('total_questions', 3)  # 从状态中获取配置的问题数量
 
     # 构建prompt
-    prompt = build_reviewer_select_questions_prompt(paper_structure)
+    prompt = build_reviewer_select_questions_prompt(paper_structure, num_questions)
 
     # 调用LLM
     questions_text = llm_client.call_reviewer(prompt)
 
     # 解析问题
-    questions = parse_questions(questions_text)
+    questions = parse_questions(questions_text, num_questions)
 
     logger.info(f"Reviewer: Selected {len(questions)} questions")
 
@@ -155,8 +156,16 @@ def integrate_final_report(state: PaperAnalysisState, llm_client: LLMClient) -> 
 
 # ==================== 辅助函数 ====================
 
-def parse_questions(questions_text: str) -> List[str]:
-    """从LLM输出中解析问题列表"""
+def parse_questions(questions_text: str, num_questions: int = 3) -> List[str]:
+    """从LLM输出中解析问题列表
+
+    Args:
+        questions_text: LLM返回的问题文本
+        num_questions: 期望的问题数量
+
+    Returns:
+        List[str]: 解析出的问题列表
+    """
     questions = []
 
     # 尝试匹配"问题1: ...", "问题2: ..."格式
@@ -170,7 +179,7 @@ def parse_questions(questions_text: str) -> List[str]:
         lines = [line.strip() for line in questions_text.split('\n') if line.strip()]
         questions = [line for line in lines if len(line) > 10]  # 过滤太短的行
 
-    return questions[:3]  # 只取前3个
+    return questions[:num_questions]  # 取前N个（N由配置决定）
 
 
 def parse_verification_result(verification_text: str) -> tuple:

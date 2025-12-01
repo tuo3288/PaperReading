@@ -29,9 +29,9 @@ ANALYZER_ANSWER_PROMPT = """请基于论文内容回答以下问题。如果引�
 
 # ==================== 审核者Prompts ====================
 
-REVIEWER_SELECT_QUESTIONS_PROMPT = """你是论文审稿人。根据论文架构，选择3个对科研工作者最重要的问题进行深入追问。
+REVIEWER_SELECT_QUESTIONS_PROMPT = """你是论文审稿人。根据论文架构，选择{num_questions}个对科研工作者最重要的问题进行深入追问。
 
-**重要提示：你只有3次提问机会，请提问最重要、最核心的问题！**
+**重要提示：你只有{num_questions}次提问机会，请提问最重要、最核心的问题！**
 
 论文架构：
 {paper_structure}
@@ -48,10 +48,10 @@ REVIEWER_SELECT_QUESTIONS_PROMPT = """你是论文审稿人。根据论文架构
    - 方法的优势、局限性或适用场景
    - 与现有方法的本质区别
 
-直接输出3个问题，每行一个，格式：
+直接输出{num_questions}个问题，每行一个，格式：
 问题1: ...
 问题2: ...
-问题3: ..."""
+问题{num_questions}: ..."""
 
 
 REVIEWER_VERIFY_PROMPT = """你是严格的审稿人。请核实以下回答是否准确。
@@ -75,7 +75,7 @@ REVIEWER_VERIFY_PROMPT = """你是严格的审稿人。请核实以下回答是�
 追问内容：（如需要，简要提问）"""
 
 
-REVIEWER_FINAL_INTEGRATION_PROMPT = """请整合以下对话内容，生成一份论文解读报告。
+REVIEWER_FINAL_INTEGRATION_PROMPT = """请整合以下对话内容，生成一份论文解读报告，注意细节不要过分精炼。
 
 对话记录：
 {qa_history}
@@ -118,9 +118,12 @@ def build_analyzer_answer_prompt(paper_content: str, question: str) -> str:
     )
 
 
-def build_reviewer_select_questions_prompt(paper_structure: str) -> str:
+def build_reviewer_select_questions_prompt(paper_structure: str, num_questions: int = 3) -> str:
     """构建问题选择prompt"""
-    return REVIEWER_SELECT_QUESTIONS_PROMPT.format(paper_structure=paper_structure)
+    return REVIEWER_SELECT_QUESTIONS_PROMPT.format(
+        paper_structure=paper_structure,
+        num_questions=num_questions
+    )
 
 
 def build_reviewer_verify_prompt(question: str, answer: str, paper_content: str) -> str:
